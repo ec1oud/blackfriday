@@ -17,11 +17,9 @@ package blackfriday
 
 import (
 	"bytes"
-	"fmt"
-	//~ "regexp"
 	"strconv"
-	//~ "strings"
 	"unicode"
+	"html"
 )
 
 // Ansi renderer configuration options.
@@ -31,18 +29,11 @@ const (
 	ANSI_SKIP_IMAGES                           // skip embedded images
 	ANSI_SKIP_LINKS                            // skip all links
 	ANSI_SAFELINK                              // only link to trusted protocols
-	ANSI_NOFOLLOW_LINKS                        // only link with rel="nofollow"
-	ANSI_NOREFERRER_LINKS                      // only link with rel="noreferrer"
-	ANSI_HREF_TARGET_BLANK                     // add a blank target
-	ANSI_TOC                                   // generate a table of contents
-	ANSI_OMIT_CONTENTS                         // skip the main contents (for a standalone table of contents)
-	ANSI_USE_XHTML                             // generate XHTML output instead of HTML
 	ANSI_USE_SMARTYPANTS                       // enable smart punctuation substitutions
 	ANSI_SMARTYPANTS_FRACTIONS                 // enable smart fractions (with ANSI_USE_SMARTYPANTS)
 	ANSI_SMARTYPANTS_DASHES                    // enable smart dashes (with ANSI_USE_SMARTYPANTS)
 	ANSI_SMARTYPANTS_LATEX_DASHES              // enable LaTeX-style dashes (with ANSI_USE_SMARTYPANTS and ANSI_SMARTYPANTS_DASHES)
 	ANSI_SMARTYPANTS_ANGLED_QUOTES             // enable angled double quotes (with ANSI_USE_SMARTYPANTS) for double quotes rendering
-	ANSI_FOOTNOTE_RETURN_LINKS                 // generate a link at the end of a footnote to return to the source
 )
 
 type AnsiRendererParameters struct {
@@ -167,7 +158,8 @@ func BreakLines(s string, width uint) []string {
 }
 
 func (options *Ansi) WriteWrapped(out *bytes.Buffer, text []byte, indent uint) {
-	wrapped := BreakLines(string(text), options.width - indent)
+	unesc := html.UnescapeString(string(text))
+	wrapped := BreakLines(unesc, options.width - indent)
 	for i, line := range wrapped {
 		if (i > 0) {
 			out.WriteString(`  `) // TODO the correct indent
@@ -191,10 +183,6 @@ func (options *Ansi) Header(out *bytes.Buffer, text func() bool, level int, id s
 	marker := out.Len()
 	doubleSpace(out)
 
-	if id == "" && options.flags&ANSI_TOC != 0 {
-		id = fmt.Sprintf("toc_%d", options.headerCount)
-	}
-
 	AnsiColor(out, '1', "33")
 
 	if !text() {
@@ -205,42 +193,30 @@ func (options *Ansi) Header(out *bytes.Buffer, text func() bool, level int, id s
 	AnsiColor(out, '0', "0")
 }
 
-func (options *Ansi) BlockAnsi(out *bytes.Buffer, text []byte) {
+func (options *Ansi) BlockHtml(out *bytes.Buffer, text []byte) {
 	if options.flags&ANSI_SKIP_HTML != 0 {
 		return
 	}
 
 	doubleSpace(out)
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(text)))
 	out.WriteByte('\n')
 }
 
 func (options *Ansi) HRule(out *bytes.Buffer) {
 	doubleSpace(out)
-	out.WriteString("<hr")
-	out.WriteString(options.closeTag)
-	out.WriteByte('\n')
+	out.WriteString("⎯⎯⎯⎯⎯⎯⎯⎯\n")
 }
 
 func (options *Ansi) BlockCode(out *bytes.Buffer, text []byte, lang string) {
 	doubleSpace(out)
-	attrEscape(out, text)
+	out.WriteString(html.UnescapeString(string(text)))
 }
 
 func (options *Ansi) BlockQuote(out *bytes.Buffer, text []byte) {
 	doubleSpace(out)
 	out.WriteString("⎸")
 	out.Write(text)
-}
-
-func (options *Ansi) BlockHtml(out *bytes.Buffer, text []byte) {
-	if options.flags&HTML_SKIP_HTML != 0 {
-		return
-	}
-
-	doubleSpace(out)
-	out.Write(text)
-	out.WriteByte('\n')
 }
 
 func (options *Ansi) Table(out *bytes.Buffer, header []byte, body []byte, columnData []int) {
@@ -305,8 +281,8 @@ func (options *Ansi) FootnoteItem(out *bytes.Buffer, name, text []byte, flags in
 	slug := slugify(name)
 	out.WriteString(options.parameters.FootnoteAnchorPrefix)
 	AnsiColor(out, '0', "33")
-	out.Write(slug)
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(slug)))
+	out.WriteString(html.UnescapeString(string(text)))
 	AnsiColor(out, '0', "0")
 }
 
@@ -380,12 +356,12 @@ func (options *Ansi) AutoLink(out *bytes.Buffer, link []byte, kind int) {
 }
 
 func (options *Ansi) CodeSpan(out *bytes.Buffer, text []byte) {
-	attrEscape(out, text)
+	out.WriteString(html.UnescapeString(string(text)))
 }
 
 func (options *Ansi) DoubleEmphasis(out *bytes.Buffer, text []byte) {
 	AnsiColor(out, '1', "35")
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(text)))
 	AnsiColor(out, '0', "0")
 }
 
@@ -394,7 +370,7 @@ func (options *Ansi) Emphasis(out *bytes.Buffer, text []byte) {
 		return
 	}
 	AnsiColor(out, '0', "35")
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(text)))
 	AnsiColor(out, '0', "0")
 }
 
@@ -415,18 +391,18 @@ func (options *Ansi) LineBreak(out *bytes.Buffer) {
 
 func (options *Ansi) Link(out *bytes.Buffer, link []byte, title []byte, content []byte) {
 	if options.flags&ANSI_SKIP_LINKS != 0 {
-		attrEscape(out, content)
+		out.WriteString(html.UnescapeString(string(content)))
 		return
 	}
 
 	if options.flags&ANSI_SAFELINK != 0 && !isSafeLink(link) {
-		attrEscape(out, content)
+		out.WriteString(html.UnescapeString(string(content)))
 		return
 	}
 
 	options.maybeWriteAbsolutePrefix(out, link)
 	AnsiColor(out, '0', "34")
-	out.Write(content)
+	out.WriteString(html.UnescapeString(string(content)))
 	AnsiColor(out, '0', "0")
 	return
 }
@@ -449,13 +425,13 @@ func (options *Ansi) RawHtmlTag(out *bytes.Buffer, text []byte) {
 
 func (options *Ansi) TripleEmphasis(out *bytes.Buffer, text []byte) {
 	AnsiColor(out, '1', "31")
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(text)))
 	AnsiColor(out, '0', "0")
 }
 
 func (options *Ansi) StrikeThrough(out *bytes.Buffer, text []byte) {
 	AnsiColor(out, '9', "30")
-	out.Write(text)
+	out.WriteString(html.UnescapeString(string(text)))
 	AnsiColor(out, '0', "0")
 }
 
@@ -467,30 +443,24 @@ func (options *Ansi) FootnoteRef(out *bytes.Buffer, ref []byte, id int) {
 }
 
 func (options *Ansi) Entity(out *bytes.Buffer, entity []byte) {
-	out.Write(entity)
+	out.WriteString(html.UnescapeString(string(entity)))
 }
 
 func (options *Ansi) NormalText(out *bytes.Buffer, text []byte) {
 	if options.flags&ANSI_USE_SMARTYPANTS != 0 {
 		options.Smartypants(out, text)
 	} else {
-		attrEscape(out, text)
+		out.WriteString(html.UnescapeString(string(text)))
 	}
 }
 
 func (options *Ansi) Smartypants(out *bytes.Buffer, text []byte) {
 	smrt := smartypantsData{false, false}
-
-	// first do normal entity escaping
-	var escaped bytes.Buffer
-	attrEscape(&escaped, text)
-	text = escaped.Bytes()
-
 	mark := 0
 	for i := 0; i < len(text); i++ {
 		if action := options.smartypants[text[i]]; action != nil {
 			if i > mark {
-				out.Write(text[mark:i])
+				out.WriteString(html.UnescapeString(string(text[mark:i])))
 			}
 
 			previousChar := byte(0)
@@ -503,7 +473,7 @@ func (options *Ansi) Smartypants(out *bytes.Buffer, text []byte) {
 	}
 
 	if mark < len(text) {
-		out.Write(text[mark:])
+		out.WriteString(html.UnescapeString(string(text[mark:])))
 	}
 }
 
