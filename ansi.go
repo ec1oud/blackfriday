@@ -217,8 +217,13 @@ func (options *Ansi) BlockCode(out *bytes.Buffer, text []byte, lang string) {
 
 func (options *Ansi) BlockQuote(out *bytes.Buffer, text []byte) {
 	doubleSpace(out)
-	out.WriteString("⎸")
-	out.Write(text)
+	unesc := html.UnescapeString(string(text))
+	wrapped := BreakLines(unesc, options.width - uint(2))
+	for _, line := range wrapped {
+		out.WriteRune('⎸')
+		out.WriteString(line)
+	}
+	out.WriteRune('\n')
 }
 
 func (options *Ansi) Table(out *bytes.Buffer, header []byte, body []byte, columnData []int) {
