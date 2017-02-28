@@ -21,6 +21,7 @@ import (
 	//~ "regexp"
 	"strconv"
 	//~ "strings"
+	"unicode"
 )
 
 // Ansi renderer configuration options.
@@ -44,11 +45,6 @@ const (
 	ANSI_FOOTNOTE_RETURN_LINKS                 // generate a link at the end of a footnote to return to the source
 )
 
-var (
-	// TODO: improve this regexp to catch all possible entities:
-	//~ htmlEntity = regexp.MustCompile(`&[a-z]{2,5};`)
-)
-
 type AnsiRendererParameters struct {
 	// Prepend this text to each relative URL.
 	AbsolutePrefix string
@@ -69,6 +65,7 @@ type AnsiRendererParameters struct {
 //
 // Do not create this directly, instead use the AnsiRenderer function.
 type Ansi struct {
+	width    uint
 	flags    int    // ANSI_* options
 	closeTag string // how to end singleton tags: either " />" or ">"
 
@@ -89,11 +86,11 @@ type Ansi struct {
 // satisfies the Renderer interface.
 //
 // flags is a set of ANSI_* options ORed together.
-func AnsiRenderer(flags int) Renderer {
-	return AnsiRendererWithParameters(flags, AnsiRendererParameters{})
+func AnsiRenderer(width int, flags int) Renderer {
+	return AnsiRendererWithParameters(width, flags, AnsiRendererParameters{})
 }
 
-func AnsiRendererWithParameters(flags int, renderParameters AnsiRendererParameters) Renderer {
+func AnsiRendererWithParameters(width int, flags int, renderParameters AnsiRendererParameters) Renderer {
 	// configure the rendering engine
 	closeTag := ""
 
@@ -102,6 +99,7 @@ func AnsiRendererWithParameters(flags int, renderParameters AnsiRendererParamete
 	}
 
 	return &Ansi{
+		width:      uint(width),
 		flags:      flags,
 		closeTag:   closeTag,
 		parameters: renderParameters,
@@ -119,6 +117,67 @@ func AnsiRendererWithParameters(flags int, renderParameters AnsiRendererParamete
 func (options *Ansi) GetFlags() int {
 	return options.flags
 }
+
+// ----------------
+// Utilities
+
+// BreakLines word-wraps the given string within width in characters
+// and returns a string slice with newline-terminated strings.
+func BreakLines(s string, width uint) []string {
+	init := make([]byte, 0, width + 1)
+	buf := bytes.NewBuffer(init)
+	ret := make([]string, 0, 4)
+
+	var current uint
+	var wordBuf bytes.Buffer
+
+	for _, char := range s {
+		if char == '\n' {
+			char = ' '
+		}
+		if unicode.IsSpace(char) {
+			if wordBuf.Len() > 0 {
+				current += uint(1 + wordBuf.Len())
+				buf.WriteRune(' ')
+				wordBuf.WriteTo(buf)
+				wordBuf.Reset()
+			}
+		} else {
+
+			wordBuf.WriteRune(char)
+
+			if current+uint(wordBuf.Len()) > width && uint(wordBuf.Len()) < width {
+				buf.WriteRune('\n')
+				ret = append(ret, buf.String())
+				buf.Reset()
+				current = 0
+			}
+		}
+	}
+
+	if wordBuf.Len() > 0 {
+		buf.WriteRune(' ')
+		wordBuf.WriteTo(buf)
+	}
+	if buf.Len() > 0 {
+		ret = append(ret, buf.String())
+	}
+
+	return ret
+}
+
+func (options *Ansi) WriteWrapped(out *bytes.Buffer, text []byte, indent uint) {
+	wrapped := BreakLines(string(text), options.width - indent)
+	for i, line := range wrapped {
+		if (i > 0) {
+			out.WriteString(`  `) // TODO the correct indent
+		}
+		out.WriteString(line)
+	}
+}
+
+// ----------------
+// output callbacks from Blackfriday
 
 func (options *Ansi) TitleBlock(out *bytes.Buffer, text []byte) {
 	text = bytes.TrimPrefix(text, []byte("% "))
@@ -273,27 +332,29 @@ func AnsiColor(out *bytes.Buffer, n byte, c string) {
 // YELLOW="\[\033[0;33m\]"
 
 func (options *Ansi) ListItem(out *bytes.Buffer, text []byte, flags int) {
-	if (flags&LIST_ITEM_CONTAINS_BLOCK != 0 && flags&LIST_TYPE_DEFINITION == 0) ||
-		flags&LIST_ITEM_BEGINNING_OF_LIST != 0 {
+
+	indent := uint(3)
+	//~ if (flags&LIST_ITEM_CONTAINS_BLOCK != 0 && flags&LIST_TYPE_DEFINITION == 0) ||
+		//~ flags&LIST_ITEM_BEGINNING_OF_LIST != 0 {
 		doubleSpace(out)
-	}
+	//~ }
 	if flags&LIST_TYPE_TERM != 0 {
 		AnsiColor(out, '0', "33")
 	} else if flags&LIST_TYPE_DEFINITION != 0 {
 		out.WriteString("    ")
-	} else {
-		out.WriteString(" ")
+		indent = uint(4)
 	}
 	switch {
 	case bytes.HasPrefix(text, []byte("[ ] ")):
-		text = append([]byte(`☐`), text[3:]...)
+		out.WriteString(` ☐`)
+		text = text[3:]
 	case bytes.HasPrefix(text, []byte("[x] ")) || bytes.HasPrefix(text, []byte("[X] ")):
-		text = append([]byte(`✔`), text[3:]...) // or could be ☒ or ☑
+		out.WriteString(` ✔`) // or could be ☒ or ☑
+		text = text[3:]
 	default:
-		text = append([]byte(`• `), text...)
+		out.WriteString(` •`)
 	}
-	out.Write(text)
-	out.WriteString("\n")
+	options.WriteWrapped(out, text, indent)
 }
 
 func (options *Ansi) Paragraph(out *bytes.Buffer, text func() bool) {
