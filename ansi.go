@@ -205,7 +205,9 @@ func (options *Ansi) BlockHtml(out *bytes.Buffer, text []byte) {
 
 func (options *Ansi) HRule(out *bytes.Buffer) {
 	doubleSpace(out)
-	out.WriteString("⎯⎯⎯⎯⎯⎯⎯⎯\n")
+	for i := uint(0); i < options.width; i++ {
+		out.WriteRune('⎯')
+	}
 }
 
 func (options *Ansi) BlockCode(out *bytes.Buffer, text []byte, lang string) {
